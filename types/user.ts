@@ -19,6 +19,7 @@ export interface Habit {
   name: string
   duration: number
   days: Record<number, DayStatus>
+  colors: Record<number, string> // Stores the actual color: "green", "yellow", "red"
   dayLocks: Record<number, DayLock>
   time: { hour: number; minute: number } | null
   notifications: boolean

@@ -136,16 +136,16 @@ export function AuthPage({ onLogin }: AuthPageProps) {
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <div className="w-full max-w-md bg-card border border-border rounded-lg p-8 shadow-lg">
         <div className="text-center mb-8">
-          <div className="flex justify-center items-center gap-3 mb-4">
-            <div className="w-20 h-20 rounded-full bg-muted border-2 border-muted-foreground flex items-center justify-center overflow-hidden">
+          <div className="flex justify-center items-center gap-3 mb-2">
+            <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
               <img
                 src="/images/photo-2025-04-28-23-15-21.jpg"
                 alt="Never Stop Learning"
                 className="w-full h-full object-cover"
               />
             </div>
+            <h1 className="text-3xl font-bold">Just</h1>
           </div>
-          <h1 className="text-3xl font-bold mb-2">Just</h1>
           <p className="text-muted-foreground text-sm">Odatlar Kuzatuvchisi</p>
         </div>
 

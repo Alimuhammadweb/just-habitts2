@@ -42,6 +42,8 @@ export async function addHabitToMongoDB(userId: number, habit: Habit): Promise<v
 
 export async function updateHabitInMongoDB(userId: number, habitId: number, updates: Partial<Habit>): Promise<void> {
   try {
+    console.log("[MongoDB] Updating habit:", habitId, "fields:", Object.keys(updates))
+
     const response = await fetch("/api/habits", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },

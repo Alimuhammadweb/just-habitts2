@@ -6,6 +6,8 @@ import type { User } from "@/types/user"
 import { ArrowLeft, Shield } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { fetchAllUsersFromMongoDB, saveUserToMongoDB } from "@/lib/db-sync"
+import { CommunityManagement } from "@/components/community-management"
+import { MessageCircle } from "lucide-react"
 
 interface AdminPanelProps {
   currentUser: User
@@ -17,6 +19,7 @@ export function AdminPanel({ currentUser, onBack, onLogout }: AdminPanelProps) {
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
+  const [activeTab, setActiveTab] = useState<"users" | "community">("users")
 
   useEffect(() => {
     loadUsers()
@@ -107,66 +110,95 @@ export function AdminPanel({ currentUser, onBack, onLogout }: AdminPanelProps) {
           </div>
         </div>
 
-        {/* Users Table */}
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <div className="p-4 border-b border-border">
-            <h2 className="text-xl font-semibold">Foydalanuvchilar ro'yxati</h2>
-          </div>
-
-          {isLoading ? (
-            <div className="p-8 text-center text-muted-foreground">Yuklanmoqda...</div>
-          ) : users.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">Hali foydalanuvchilar yo'q</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">#</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Ism</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Email</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Ro'yxatdan o'tgan</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Amallar</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {users.map((user, index) => {
-                    const regDate = new Date(user.createdAt)
-                    const formattedDate = `${regDate.getDate().toString().padStart(2, "0")}.${(regDate.getMonth() + 1).toString().padStart(2, "0")}.${regDate.getFullYear()}`
-
-                    return (
-                      <tr key={user.id} className="hover:bg-muted/50">
-                        <td className="px-4 py-3 text-sm">{index + 1}</td>
-                        <td className="px-4 py-3 text-sm font-medium">{user.name}</td>
-                        <td className="px-4 py-3 text-sm">{user.email}</td>
-                        <td className="px-4 py-3 text-sm">{formattedDate}</td>
-                        <td className="px-4 py-3 text-sm">
-                          <span
-                            className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              user.isActive ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"
-                            }`}
-                          >
-                            {user.isActive ? "Faol" : "Nofaol"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <Button
-                            onClick={() => toggleUserStatus(user.id)}
-                            variant={user.isActive ? "destructive" : "default"}
-                            size="sm"
-                          >
-                            {user.isActive ? "Bloklash" : "Blokdan olish"}
-                          </Button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+        {/* Tabs for Users and Community */}
+        <div className="flex gap-2 mb-6 border-b border-border">
+          <button
+            onClick={() => setActiveTab("users")}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === "users"
+                ? "border-b-2 border-purple-500 text-purple-500"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Foydalanuvchilar
+          </button>
+          <button
+            onClick={() => setActiveTab("community")}
+            className={`px-4 py-2 font-medium transition-colors flex items-center gap-2 ${
+              activeTab === "community"
+                ? "border-b-2 border-purple-500 text-purple-500"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <MessageCircle className="h-4 w-4" />
+            Community Boshqaruvi
+          </button>
         </div>
+
+        {activeTab === "users" ? (
+          <div className="bg-card border border-border rounded-lg overflow-hidden">
+            {/* Users Table */}
+            <div className="p-4 border-b border-border">
+              <h2 className="text-xl font-semibold">Foydalanuvchilar ro'yxati</h2>
+            </div>
+
+            {isLoading ? (
+              <div className="p-8 text-center text-muted-foreground">Yuklanmoqda...</div>
+            ) : users.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground">Hali foydalanuvchilar yo'q</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">#</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">Ism</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">Email</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">Ro'yxatdan o'tgan</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">Amallar</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {users.map((user, index) => {
+                      const regDate = new Date(user.createdAt)
+                      const formattedDate = `${regDate.getDate().toString().padStart(2, "0")}.${(regDate.getMonth() + 1).toString().padStart(2, "0")}.${regDate.getFullYear()}`
+
+                      return (
+                        <tr key={user.id} className="hover:bg-muted/50">
+                          <td className="px-4 py-3 text-sm">{index + 1}</td>
+                          <td className="px-4 py-3 text-sm font-medium">{user.name}</td>
+                          <td className="px-4 py-3 text-sm">{user.email}</td>
+                          <td className="px-4 py-3 text-sm">{formattedDate}</td>
+                          <td className="px-4 py-3 text-sm">
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                user.isActive ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"
+                              }`}
+                            >
+                              {user.isActive ? "Faol" : "Nofaol"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <Button
+                              onClick={() => toggleUserStatus(user.id)}
+                              variant={user.isActive ? "destructive" : "default"}
+                              size="sm"
+                            >
+                              {user.isActive ? "Bloklash" : "Blokdan olish"}
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : (
+          <CommunityManagement currentUser={currentUser} />
+        )}
       </div>
     </div>
   )

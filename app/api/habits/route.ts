@@ -21,8 +21,30 @@ export async function PUT(request: NextRequest) {
     const { userId, habitId, updates } = await request.json()
     const db = await getDb()
 
-    // Update specific habit in user's habits array
-    await db.collection("users").updateOne({ id: userId, "habits.id": habitId }, { $set: { "habits.$": updates } })
+    const updateFields: Record<string, any> = {}
+
+    // Only update the fields that are provided
+    if (updates.days !== undefined) {
+      updateFields["habits.$.days"] = updates.days
+    }
+    if (updates.dayLocks !== undefined) {
+      updateFields["habits.$.dayLocks"] = updates.dayLocks
+    }
+    if (updates.missReasons !== undefined) {
+      updateFields["habits.$.missReasons"] = updates.missReasons
+    }
+    if (updates.name !== undefined) {
+      updateFields["habits.$.name"] = updates.name
+    }
+    if (updates.duration !== undefined) {
+      updateFields["habits.$.duration"] = updates.duration
+    }
+    if (updates.why !== undefined) {
+      updateFields["habits.$.why"] = updates.why
+    }
+
+    // Update specific habit fields in user's habits array
+    await db.collection("users").updateOne({ id: userId, "habits.id": habitId }, { $set: updateFields })
 
     return NextResponse.json({ success: true })
   } catch (error) {

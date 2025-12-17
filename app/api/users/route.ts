@@ -41,14 +41,34 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// export async function PUT(request: NextRequest) {
+//   try {
+//     const user = await request.json()
+//     const db = await getDb()
+
+//     await db.collection("users").replaceOne({ id: user.id }, user, { upsert: true })
+
+//     return NextResponse.json(user)
+//   } catch (error) {
+//     console.error("[MongoDB] Error updating user:", error)
+//     return NextResponse.json({ error: "Failed to update user" }, { status: 500 })
+//   }
+// }
+
+
 export async function PUT(request: NextRequest) {
   try {
     const user = await request.json()
     const db = await getDb()
 
-    await db.collection("users").replaceOne({ id: user.id }, user, { upsert: true })
+    const { _id, ...safeUser } = user
 
-    return NextResponse.json(user)
+    await db.collection("users").updateOne(
+      { id: user.id },     // filter
+      { $set: safeUser }   // update (_id yo‘q)
+    )
+
+    return NextResponse.json(safeUser)
   } catch (error) {
     console.error("[MongoDB] Error updating user:", error)
     return NextResponse.json({ error: "Failed to update user" }, { status: 500 })

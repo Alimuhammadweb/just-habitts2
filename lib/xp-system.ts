@@ -10,8 +10,18 @@ import { XP_REWARDS, LEVEL_THRESHOLDS } from "@/types/user"
  * - No more cheating by changing days quickly
  */
 
+// export function getCurrentDateString(): string {
+//   const now = new Date()
+//   const year = now.getFullYear()
+//   const month = String(now.getMonth() + 1).padStart(2, "0")
+//   const day = String(now.getDate()).padStart(2, "0")
+//   return `${year}-${month}-${day}`
+// }
+
+
 export function getCurrentDateString(): string {
   const now = new Date()
+  now.setHours(now.getHours() + 5) // O‘zbekiston UTC+5
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, "0")
   const day = String(now.getDate()).padStart(2, "0")
@@ -19,19 +29,30 @@ export function getCurrentDateString(): string {
 }
 
 export function getDateString(date: Date): string {
+  date.setHours(date.getHours() + 5) // UTC+5
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
   const day = String(date.getDate()).padStart(2, "0")
   return `${year}-${month}-${day}`
 }
 
+
 export function isDateTodayOrFuture(dateString: string): boolean {
   const today = getCurrentDateString()
   return dateString >= today
 }
 
+// export function getExpectedDateForDay(habitStartTimestamp: number, dayIndex: number): string {
+//   const startDate = new Date(habitStartTimestamp)
+//   const expectedDate = new Date(startDate)
+//   expectedDate.setDate(expectedDate.getDate() + dayIndex)
+//   return getDateString(expectedDate)
+// }
+
+
 export function getExpectedDateForDay(habitStartTimestamp: number, dayIndex: number): string {
   const startDate = new Date(habitStartTimestamp)
+  startDate.setHours(startDate.getHours() + 5) // UTC+5
   const expectedDate = new Date(startDate)
   expectedDate.setDate(expectedDate.getDate() + dayIndex)
   return getDateString(expectedDate)
@@ -197,6 +218,11 @@ export function updateHabitStatus(
     const { [dayIndex]: removed, ...restDays } = updatedHabit.days
     updatedHabit.days = restDays
 
+    if (updatedHabit.colors) {
+      const { [dayIndex]: removedColor, ...restColors } = updatedHabit.colors
+      updatedHabit.colors = restColors
+    }
+
     if (updatedHabit.dayLocks) {
       const { [dayIndex]: removedLock, ...restLocks } = updatedHabit.dayLocks
       updatedHabit.dayLocks = restLocks
@@ -210,6 +236,16 @@ export function updateHabitStatus(
     updatedHabit.days = {
       ...updatedHabit.days,
       [dayIndex]: newStatus,
+    }
+
+    const colorMap = {
+      completed: "green",
+      partial: "yellow",
+      missed: "red",
+    }
+    updatedHabit.colors = {
+      ...updatedHabit.colors,
+      [dayIndex]: colorMap[newStatus],
     }
 
     updatedHabit.dayLocks = {

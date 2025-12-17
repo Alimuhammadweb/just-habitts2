@@ -16,15 +16,17 @@ import { translations } from "@/lib/translations"
 import type { Language } from "@/types/language"
 import { InfoModal } from "@/components/info-modal"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { CommunityPage } from "@/components/community-page"
 import {
   saveUserToMongoDB,
   addHabitToMongoDB,
   deleteHabitFromMongoDB,
   savePomodoroToMongoDB,
   fetchAllUsersFromMongoDB,
+  updateHabitInMongoDB,
 } from "@/lib/db-sync"
-
-import { Sun, LogOut, Shield, Target, Calendar, Plus, Clock, Trophy, TrendingUp, Globe } from "lucide-react"
+import { Calendar } from "lucide-react"
+import { Sun, LogOut, Shield, Target, Plus, Clock, Trophy, TrendingUp, Globe, MessageCircle } from "lucide-react"
 
 interface MainAppProps {
   currentUser: User
@@ -33,10 +35,11 @@ interface MainAppProps {
   onLogout: () => void
 }
 
-export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }: MainAppProps) {
+export function MainApp({ currentUser: initialUser, setCurrentUser, onAdminClick, onLogout }: MainAppProps) {
   const { toast } = useToast()
 
-  const [habits, setHabits] = useState<Habit[]>(currentUser.habits || [])
+  const [currentUser, setCurrentUserState] = useState<User>(initialUser)
+  const [habits, setHabits] = useState<Habit[]>([])
   const [plannedHabits, setPlannedHabits] = useState<Habit[]>([])
   const [showAddModal, setShowAddModal] = useState(false)
   const [showAboutModal, setShowAboutModal] = useState(false)
@@ -54,23 +57,73 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
   const [isDarkMode, setIsDarkMode] = useState(false)
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const [allUsers, setAllUsers] = useState<User[]>([])
+  const [pendingUpdates, setPendingUpdates] = useState<boolean>(false)
+  const pendingUpdatesRef = useRef<boolean>(false)
+  const [showCommunity, setShowCommunity] = useState(false)
+  const [hasNewPinnedPost, setHasNewPinnedPost] = useState(false)
+  const [isLoadingData, setIsLoadingData] = useState(true)
 
   const t = translations[language]
 
   useEffect(() => {
-    const lockedUser = lockOldDays(currentUser)
-    if (JSON.stringify(lockedUser.habits) !== JSON.stringify(currentUser.habits)) {
-      console.log("[v0] Locking old days on app load")
-      const users = JSON.parse(localStorage.getItem("just-habits-users") || "[]")
-      const userIndex = users.findIndex((u: User) => u.id === currentUser.id)
-      if (userIndex !== -1) {
-        users[userIndex] = lockedUser
-        localStorage.setItem("just-habits-users", JSON.stringify(users))
-        saveUserToMongoDB(lockedUser)
-        setCurrentUser(lockedUser)
-        setHabits(lockedUser.habits)
+    const loadUserData = async () => {
+      console.log("[v0] Loading user data from MongoDB...")
+      try {
+        const response = await fetch(`/api/users/${currentUser.id}`)
+        if (response.ok) {
+          const mongoUser = await response.json()
+          console.log("[v0] User loaded from MongoDB:", mongoUser.id, "habits:", mongoUser.habits?.length || 0)
+
+          const lockedUser = lockOldDays(mongoUser)
+
+          setCurrentUserState(lockedUser)
+          setHabits(lockedUser.habits || [])
+
+          const users = JSON.parse(localStorage.getItem("just-habits-users") || "[]")
+          const userIndex = users.findIndex((u: User) => u.id === lockedUser.id)
+          if (userIndex !== -1) {
+            users[userIndex] = lockedUser
+          } else {
+            users.push(lockedUser)
+          }
+          localStorage.setItem("just-habits-users", JSON.stringify(users))
+
+          if (JSON.stringify(mongoUser.habits) !== JSON.stringify(lockedUser.habits)) {
+            console.log("[v0] Saving locked days to MongoDB")
+            saveUserToMongoDB(lockedUser)
+          }
+        } else {
+          console.log("[v0] User not found in MongoDB, checking localStorage...")
+          const users = JSON.parse(localStorage.getItem("just-habits-users") || "[]")
+          const localUser = users.find((u: User) => u.id === currentUser.id)
+
+          if (localUser) {
+            console.log("[v0] User found in localStorage, syncing to MongoDB...")
+            const lockedUser = lockOldDays(localUser)
+            setCurrentUserState(lockedUser)
+            setHabits(lockedUser.habits || [])
+            saveUserToMongoDB(lockedUser)
+          } else {
+            console.log("[v0] Using initial user data")
+            const lockedUser = lockOldDays(initialUser)
+            setCurrentUserState(lockedUser)
+            setHabits(lockedUser.habits || [])
+            saveUserToMongoDB(lockedUser)
+          }
+        }
+      } catch (error) {
+        console.error("[v0] Error loading user data:", error)
+        const users = JSON.parse(localStorage.getItem("just-habits-users") || "[]")
+        const localUser = users.find((u: User) => u.id === currentUser.id) || initialUser
+        const lockedUser = lockOldDays(localUser)
+        setCurrentUserState(lockedUser)
+        setHabits(lockedUser.habits || [])
+      } finally {
+        setIsLoadingData(false)
       }
     }
+
+    loadUserData()
 
     const savedTheme = localStorage.getItem("habit-theme")
     if (savedTheme === "light") {
@@ -95,12 +148,51 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
   }, [])
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      checkAndActivatePlannedHabits()
-    }, 60000) // Check every minute
+    const syncWithDatabase = async () => {
+      if (isLoadingData) {
+        console.log("[v0] Skipping sync - initial data loading")
+        return
+      }
 
-    return () => clearInterval(interval)
-  }, [plannedHabits])
+      if (pendingUpdatesRef.current) {
+        console.log("[v0] Skipping sync - pending updates in progress")
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/users/${currentUser.id}`)
+        if (response.ok) {
+          const updatedUser = await response.json()
+
+          const currentHabitsJson = JSON.stringify(habits)
+          const newHabitsJson = JSON.stringify(updatedUser.habits || [])
+
+          if (currentHabitsJson !== newHabitsJson) {
+            console.log("[v0] Syncing habits from database - changes detected")
+            setHabits(updatedUser.habits || [])
+            setCurrentUserState(updatedUser)
+
+            const users = JSON.parse(localStorage.getItem("just-habits-users") || "[]")
+            const userIndex = users.findIndex((u: User) => u.id === currentUser.id)
+            if (userIndex !== -1) {
+              users[userIndex] = updatedUser
+              localStorage.setItem("just-habits-users", JSON.stringify(users))
+            }
+          }
+        }
+      } catch (error) {
+        console.error("[v0] Error syncing with database:", error)
+      }
+    }
+
+    if (!isLoadingData) {
+      syncWithDatabase()
+
+      const syncInterval = setInterval(syncWithDatabase, 5000)
+
+      return () => clearInterval(syncInterval)
+    }
+  }, [currentUser.id, isLoadingData, habits])
 
   useEffect(() => {
     const storedTimer = localStorage.getItem(`timer_${currentUser.id}`)
@@ -172,7 +264,30 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
       }
     }
     loadUsers()
-  }, [currentUser.xpData.totalXP]) // Reload when XP changes
+  }, [currentUser.xpData.totalXP])
+
+  useEffect(() => {
+    const checkNewPinnedPost = async () => {
+      try {
+        const response = await fetch("/api/community/posts")
+        const posts = await response.json()
+        const pinnedPost = posts.find((p: any) => p.isPinned)
+
+        if (pinnedPost) {
+          const lastSeenPinId = localStorage.getItem(`lastSeenPin_${currentUser.id}`)
+          if (lastSeenPinId !== String(pinnedPost.id)) {
+            setHasNewPinnedPost(true)
+          }
+        }
+      } catch (error) {
+        console.error("[v0] Error checking pinned posts:", error)
+      }
+    }
+
+    checkNewPinnedPost()
+    const interval = setInterval(checkNewPinnedPost, 30000)
+    return () => clearInterval(interval)
+  }, [currentUser.id])
 
   const checkAndActivatePlannedHabits = () => {
     const now = Date.now()
@@ -282,15 +397,16 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
     toast({ title: t.habitDeleted, description: t.habitDeletedSuccess })
   }
 
-  const updateHabitDay = async (
-    habitId: number,
-    dayIndex: number,
-    status: "completed" | "partial" | "missed" | "none",
-    missReason?: string,
-  ) => {
-    const result = updateHabitStatus(currentUser, habitId, dayIndex, status, missReason)
+  const handleUpdateDay = async (habitId: number, dayIndex: number, status: string | "none", reason?: string) => {
+    console.log("[v0] Updating day:", habitId, dayIndex, status)
+    setPendingUpdates(true)
+    pendingUpdatesRef.current = true
+
+    const result = updateHabitStatus(currentUser, habitId, dayIndex, status as any, reason)
 
     if (!result.success) {
+      setPendingUpdates(false)
+      pendingUpdatesRef.current = false
       toast({
         title: "Cannot change status",
         description: result.message,
@@ -300,71 +416,100 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
     }
 
     if (result.updatedUser) {
-      setCurrentUser(result.updatedUser)
+      setCurrentUserState(result.updatedUser)
       setHabits(result.updatedUser.habits)
 
-      // LocalStorage ga darhol saqlash
-      const localUsers = JSON.parse(localStorage.getItem("just-habits-users") || "[]") as User[]
-      const userIndex = localUsers.findIndex((u) => u.id === result.updatedUser!.id)
-      if (userIndex === -1) {
-        localUsers.push(result.updatedUser)
-      } else {
-        localUsers[userIndex] = result.updatedUser
-      }
-      localStorage.setItem("just-habits-users", JSON.stringify(localUsers))
-
-      if (result.xpChange && result.xpChange > 0) {
-        toast({
-          title: result.message,
-          description:
-            status === "completed"
-              ? t.habitCompleted
-              : status === "partial"
-                ? t.habitPartialCompleted
-                : "Status updated",
-        })
-      } else if (result.xpChange && result.xpChange < 0) {
-        toast({
-          title: "XP adjusted",
-          description: `${result.xpChange} XP (status changed)`,
-        })
-      }
-
-      Promise.resolve().then(async () => {
-        try {
-          await saveUserToMongoDB(result.updatedUser!)
-          const dbUsers = await fetchAllUsersFromMongoDB()
-
-          let allUsersForRanking: User[]
-          if (dbUsers.length > 0) {
-            allUsersForRanking = dbUsers
-          } else {
-            const localUsers = JSON.parse(localStorage.getItem("just-habits-users") || "[]") as User[]
-            allUsersForRanking = localUsers
-          }
-
-          const userIndex = allUsersForRanking.findIndex((u) => u.id === result.updatedUser!.id)
-          if (userIndex === -1) {
-            allUsersForRanking.push(result.updatedUser!)
-          } else {
-            allUsersForRanking[userIndex] = result.updatedUser!
-          }
-
-          const usersWithRanks = calculateRanks(allUsersForRanking)
-          localStorage.setItem("just-habits-users", JSON.stringify(usersWithRanks))
-
-          await Promise.all(usersWithRanks.map((user) => saveUserToMongoDB(user)))
-
-          const updatedCurrentUser = usersWithRanks.find((u) => u.id === currentUser.id)
-          if (updatedCurrentUser) {
-            setCurrentUser(updatedCurrentUser)
-            setHabits(updatedCurrentUser.habits)
-            setAllUsers(usersWithRanks)
-          }
-        } catch (err) {
-          console.error("[v0] Background sync error:", err)
+      try {
+        const updatedHabit = result.updatedUser.habits.find((h) => h.id === habitId)
+        if (updatedHabit) {
+          await updateHabitInMongoDB(currentUser.id, habitId, {
+            days: updatedHabit.days,
+            colors: updatedHabit.colors,
+            dayLocks: updatedHabit.dayLocks,
+            missReasons: updatedHabit.missReasons,
+          })
+          console.log("[v0] Habit day and color saved to MongoDB successfully")
         }
-      })
+
+        await fetch("/api/users/xp", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            xpData: result.updatedUser.xpData,
+          }),
+        })
+
+        const localUsers = JSON.parse(localStorage.getItem("just-habits-users") || "[]") as User[]
+        const userIndex = localUsers.findIndex((u) => u.id === result.updatedUser!.id)
+        if (userIndex === -1) {
+          localUsers.push(result.updatedUser)
+        } else {
+          localUsers[userIndex] = result.updatedUser
+        }
+        localStorage.setItem("just-habits-users", JSON.stringify(localUsers))
+
+        if (result.xpChange && result.xpChange > 0) {
+          toast({
+            title: result.message,
+            description:
+              status === "completed"
+                ? t.habitCompleted
+                : status === "partial"
+                  ? t.habitPartialCompleted
+                  : "Status updated",
+          })
+        } else if (result.xpChange && result.xpChange < 0) {
+          toast({
+            title: "XP adjusted",
+            description: `${result.xpChange} XP (status changed)`,
+          })
+        }
+
+        Promise.resolve().then(async () => {
+          try {
+            const dbUsers = await fetchAllUsersFromMongoDB()
+
+            let allUsersForRanking: User[]
+            if (dbUsers.length > 0) {
+              allUsersForRanking = dbUsers
+            } else {
+              const localUsers = JSON.parse(localStorage.getItem("just-habits-users") || "[]") as User[]
+              allUsersForRanking = localUsers
+            }
+
+            const userIndex = allUsersForRanking.findIndex((u) => u.id === result.updatedUser!.id)
+            if (userIndex === -1) {
+              allUsersForRanking.push(result.updatedUser!)
+            } else {
+              allUsersForRanking[userIndex] = result.updatedUser!
+            }
+
+            const usersWithRanks = calculateRanks(allUsersForRanking)
+            localStorage.setItem("just-habits-users", JSON.stringify(usersWithRanks))
+
+            await Promise.all(usersWithRanks.map((user) => saveUserToMongoDB(user)))
+
+            const updatedCurrentUser = usersWithRanks.find((u) => u.id === currentUser.id)
+            if (updatedCurrentUser) {
+              setCurrentUserState(updatedCurrentUser)
+              setHabits(updatedCurrentUser.habits)
+              setAllUsers(usersWithRanks)
+            }
+
+            console.log("[v0] Rank calculation and sync complete")
+          } catch (error) {
+            console.error("[v0] Error in background rank calculation:", error)
+          } finally {
+            setPendingUpdates(false)
+            pendingUpdatesRef.current = false
+          }
+        })
+      } catch (error) {
+        console.error("[v0] Error saving to MongoDB:", error)
+        setPendingUpdates(false)
+        pendingUpdatesRef.current = false
+      }
     }
   }
 
@@ -480,6 +625,34 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
     setShowPomodoro(false)
     setShowLeaderboard(false)
     setShowStatistics(false)
+    setShowCommunity(false)
+  }
+
+  const handleCommunityClick = async () => {
+    setShowCommunity(true)
+    setHasNewPinnedPost(false)
+
+    try {
+      const response = await fetch("/api/community/posts")
+      const posts = await response.json()
+      const pinnedPost = posts.find((p: any) => p.isPinned)
+      if (pinnedPost) {
+        localStorage.setItem(`lastSeenPin_${currentUser.id}`, String(pinnedPost.id))
+      }
+    } catch (error) {
+      console.error("[v0] Error marking pin as seen:", error)
+    }
+  }
+
+  if (isLoadingData) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">{t.loading || "Loading..."}</p>
+        </div>
+      </div>
+    )
   }
 
   if (showLeaderboard) {
@@ -511,21 +684,27 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
     return <StatisticsPage onBack={() => setShowStatistics(false)} language={language} habits={habits} />
   }
 
+  if (showCommunity) {
+    return <CommunityPage language={language} currentUser={currentUser} onBack={handleBackClick} />
+  }
+
   return (
     <div className={`min-h-screen bg-background flex flex-col`}>
       <div className="flex-1 max-w-7xl mx-auto p-3 sm:p-6 lg:p-8 w-full">
-        {/* Header */}
         <header className="sticky top-0 z-40 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-14 sm:h-16 items-center justify-between px-3 sm:px-4">
-            <div className="flex items-center gap-2 sm:gap-4">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-muted border-2 border-muted-foreground flex items-center justify-center overflow-hidden flex-shrink-0">
-                <img src="/images/photo-2025-04-28-23-15-21.jpg" alt="Logo" className="w-full h-full object-cover" />
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg overflow-hidden flex-shrink-0 border border-border">
+                <img
+                  src="/images/photo-2025-04-28-23-15-21.jpg"
+                  alt="Never Stop Learning"
+                  className="w-full h-full object-cover"
+                />
               </div>
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Just</h1>
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2">
-              {/* Statistics button */}
               <Button
                 variant="ghost"
                 size="icon"
@@ -565,7 +744,6 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
                 <LogOut className="h-4 w-4" />
               </Button>
 
-              {/* Language Dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" className="h-9 px-2 sm:px-3 bg-transparent gap-1">
@@ -605,7 +783,22 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
             className="text-xs sm:text-sm px-2 py-1.5 sm:px-3 sm:py-2 h-auto min-h-[40px]"
           >
             <Calendar className="h-4 w-4 mr-1 sm:mr-2 flex-shrink-0" />
-            <span className="truncate">{t.plannedHabits}</span>
+            <span className="truncate">
+              {t.plannedHabits} ({plannedHabits.length})
+            </span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCommunityClick}
+            className="text-xs sm:text-sm px-2 py-1.5 sm:px-3 sm:py-2 h-auto min-h-[40px] relative bg-transparent"
+          >
+            <MessageCircle className="h-4 w-4 mr-1 sm:mr-2 flex-shrink-0" />
+            <span className="truncate">Community</span>
+            {hasNewPinnedPost && (
+              <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+            )}
           </Button>
 
           <Button
@@ -629,7 +822,6 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
           </Button>
         </div>
 
-        {/* Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 md:gap-4 mb-6 sm:mb-8">
           <div className="bg-card border border-border rounded-lg p-3 sm:p-4 md:p-6 text-center">
             <div className="text-xl sm:text-2xl md:text-3xl font-bold mb-1">{stats.totalHabits}</div>
@@ -649,7 +841,6 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
           </div>
         </div>
 
-        {/* Habits List */}
         {habits.length === 0 ? (
           <div className="text-center py-12 bg-card border border-border rounded-lg">
             <p className="text-xl text-muted-foreground mb-2">{t.noHabitsYet}</p>
@@ -672,7 +863,7 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
                   key={habit.id}
                   habit={habit}
                   onDelete={deleteHabit}
-                  onUpdateDay={updateHabitDay}
+                  onUpdateDay={handleUpdateDay}
                   language={language}
                 />
               ))}
@@ -690,18 +881,14 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
         )}
       </div>
 
-      {/* Footer */}
       <footer className="w-full border-t border-border/40 mt-12 py-8 bg-card/30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col items-center gap-4 text-center">
-            {/* Credit text */}
             <p className="text-sm text-muted-foreground">
               Bu sayt Mr John boshchiligida Lord Team jamosi tomonidan yasaldi
             </p>
 
-            {/* Contact links */}
             <div className="flex items-center gap-4 flex-wrap justify-center">
-              {/* Mr John Telegram */}
               <a
                 href="https://t.me/webdeveloper_4o4"
                 target="_blank"
@@ -714,7 +901,6 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
                 <span>Mr John</span>
               </a>
 
-              {/* Lord Team Lead Developer */}
               <a
                 href="https://t.me/webdeveloper404"
                 target="_blank"
@@ -725,7 +911,6 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
               </a>
             </div>
 
-            {/* Main channel */}
             <a
               href="https://t.me/just_mind5"
               target="_blank"
@@ -737,7 +922,6 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
           </div>
         </div>
       </footer>
-      {/* End of Footer */}
 
       {pomodoroTimerRunning && !showPomodoro && (
         <div className="fixed top-20 right-4 bg-gradient-to-r from-red-500 to-orange-500 text-white px-4 py-3 rounded-full shadow-lg z-50 flex items-center gap-2 animate-pulse">
@@ -759,8 +943,8 @@ export function MainApp({ currentUser, setCurrentUser, onAdminClick, onLogout }:
       {showAboutModal && <ProfilePage onClose={() => setShowAboutModal(false)} currentUser={currentUser} />}
 
       {showRulesModal && (
-        <InfoModal title={t.rulesContent.title} onClose={() => setShowRulesModal(false)}>
-          <div className="space-y-4 text-sm whitespace-pre-line">
+        <InfoModal  title={t.rulesContent.title} onClose={() => setShowRulesModal(false)}>
+          <div className="space-y-4 overflow-hidden text-sm whitespace-pre-line">
             <p className="text-muted-foreground">{t.rulesContent.intro}</p>
 
             <div className="space-y-2">

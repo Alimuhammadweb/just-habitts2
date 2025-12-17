@@ -7,13 +7,18 @@ const uri =
 let cachedClient: MongoClient | null = null
 let cachedDb: Db | null = null
 
+/**
+ * MongoDB bazasiga ulanish
+ * Bu funksiya connection pool ishlatadi va bir marta ulanish yaratadi
+ * @returns {Promise<{client: MongoClient, db: Db}>} MongoDB client va database
+ */
 export async function connectToDatabase() {
   if (cachedClient && cachedDb) {
     return { client: cachedClient, db: cachedDb }
   }
 
   const client = await MongoClient.connect(uri)
-  const db = client.db("habits_app")
+  const db = client.db("taxi_bot")
 
   cachedClient = client
   cachedDb = db
@@ -21,6 +26,10 @@ export async function connectToDatabase() {
   return { client, db }
 }
 
+/**
+ * Database obyektini olish
+ * @returns {Promise<Db>} MongoDB database
+ */
 export async function getDb() {
   const { db } = await connectToDatabase()
   return db
